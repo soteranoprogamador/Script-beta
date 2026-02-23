@@ -1,6 +1,7 @@
 --[[
-    Soterano HUB - Premium Edition
-    Aimbot Perfeito | FOV Ajustável | Interface Minimizável
+    Soterano HUB - Versão Xeno
+    Compatível com executor Xeno
+    Aimbot Universal | ESP Corporal | FOV Ajustável
 --]]
 
 -- Services
@@ -8,9 +9,16 @@ local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local TweenService = game:GetService("TweenService")
-local CoreGui = game:GetService("CoreGui")
 local LocalPlayer = Players.LocalPlayer
 local Camera = workspace.CurrentCamera
+
+-- Verificação inicial
+if not LocalPlayer then
+    LocalPlayer = Players:GetPlayers()[1]
+end
+
+-- Usando PlayerGui (mais compatível com Xeno)
+local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
 -- Configurações
 local Settings = {
@@ -27,30 +35,35 @@ local Settings = {
 }
 
 -- Variáveis Globais
-local Aiming = false
 local CurrentTarget = nil
 local FOVCircle = nil
 local ScreenGui = nil
 local MainFrame = nil
-local MinimizedHeight = 50
-local ExpandedHeight = 400
+local ESPCache = {}
 
--- Função para verificar se o jogador está vivo
+-- Função para verificar se jogador está vivo
 local function IsPlayerAlive(player)
-    return player.Character and 
-           player.Character:FindFirstChild("Humanoid") and 
-           player.Character.Humanoid.Health > 0 and
-           player.Character:FindFirstChild("Head")
+    local success, result = pcall(function()
+        return player and 
+               player.Character and 
+               player.Character:FindFirstChild("Humanoid") and 
+               player.Character.Humanoid.Health > 0 and
+               player.Character:FindFirstChild("Head") and
+               player.Character:FindFirstChild("HumanoidRootPart")
+    end)
+    return success and result
 end
 
--- Função para verificar se é do mesmo time
+-- Função para verificar time
 local function IsTeamMate(player)
     if not Settings.TeamCheck then return false end
-    if player.Team == nil or LocalPlayer.Team == nil then return false end
-    return player.Team == LocalPlayer.Team
+    local success, result = pcall(function()
+        return player.Team and LocalPlayer.Team and player.Team == LocalPlayer.Team
+    end)
+    return success and result
 end
 
--- Função melhorada para verificar visibilidade (Wall Check)
+-- Função melhorada de Wall Check (otimizada para Xeno)
 local function IsTargetVisible(character)
     if not Settings.WallCheck then return true end
     
@@ -59,37 +72,30 @@ local function IsTargetVisible(character)
     
     local origin = Camera.CFrame.Position
     local direction = (head.Position - origin).Unit
+    
+    -- Raycast mais simples e compatível
     local ray = Ray.new(origin, direction * 1000)
-    
-    -- Ignorar o próprio personagem e a câmera
-    local ignoreList = {LocalPlayer.Character, Camera}
-    
-    local hit, position, normal = workspace:FindPartOnRayWithIgnoreList(ray, ignoreList)
+    local hit, position = workspace:FindPartOnRayWithIgnoreList(ray, {LocalPlayer.Character, Camera})
     
     if hit then
-        -- Se acertou algo que é descendente do personagem alvo, está visível
-        if hit:IsDescendantOf(character) then
-            return true
-        end
-        return false
+        return hit:IsDescendantOf(character)
     end
     return true
 end
 
--- Função melhorada para encontrar o alvo mais próximo dentro do FOV
-local function GetClosestTargetToFOV()
+-- Função para encontrar alvo (otimizada)
+local function GetClosestTarget()
     local closestPlayer = nil
     local shortestDistance = Settings.FOVRadius
     local center = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
     
     for _, player in ipairs(Players:GetPlayers()) do
         if player ~= LocalPlayer and IsPlayerAlive(player) and not IsTeamMate(player) then
-            
             local character = player.Character
             local head = character:FindFirstChild("Head")
             
             if head then
-                -- Verificar visibilidade se Wall Check estiver ativado
+                -- Verificar visibilidade
                 if Settings.WallCheck and not IsTargetVisible(character) then
                     continue
                 end
@@ -99,15 +105,13 @@ local function GetClosestTargetToFOV()
                 if onScreen then
                     local distance = (Vector2.new(screenPos.X, screenPos.Y) - center).Magnitude
                     
-                    -- Se FOV estiver desativado, considera qualquer distância
-                    if not Settings.FOVEnabled then
-                        if not closestPlayer then
-                            closestPlayer = player
-                            shortestDistance = distance
-                        end
-                    else
+                    if Settings.FOVEnabled then
                         if distance < shortestDistance then
                             shortestDistance = distance
+                            closestPlayer = player
+                        end
+                    else
+                        if not closestPlayer then
                             closestPlayer = player
                         end
                     end
@@ -119,48 +123,16 @@ local function GetClosestTargetToFOV()
     return closestPlayer
 end
 
--- Função para criar o círculo FOV
-local function CreateFOVCircle()
-    if FOVCircle then 
-        FOVCircle:Destroy()
-        FOVCircle = nil
-    end
-    
-    if not ScreenGui then return end
-    
-    FOVCircle = Instance.new("Frame")
-    FOVCircle.Name = "FOVCircle"
-    FOVCircle.Parent = ScreenGui
-    FOVCircle.BackgroundTransparency = 1
-    FOVCircle.BorderSizePixel = 2
-    FOVCircle.BorderColor3 = Settings.FOVColor
-    FOVCircle.Size = UDim2.new(0, Settings.FOVRadius * 2, 0, Settings.FOVRadius * 2)
-    FOVCircle.Position = UDim2.new(0.5, -Settings.FOVRadius, 0.5, -Settings.FOVRadius)
-    FOVCircle.ZIndex = 1000
-    FOVCircle.Visible = Settings.FOVEnabled and Settings.AimbotEnabled
-
-    local CircleCorner = Instance.new("UICorner")
-    CircleCorner.Parent = FOVCircle
-    CircleCorner.CornerRadius = UDim.new(0.5, 0)
-    
-    -- Adicionar um brilho sutil
-    local Stroke = Instance.new("UIStroke")
-    Stroke.Parent = FOVCircle
-    Stroke.Color = Settings.FOVColor
-    Stroke.Thickness = 1.5
-    Stroke.Transparency = 0.3
-end
-
--- Função para criar a interface
+-- Criar interface (adaptada para Xeno)
 local function CreateUI()
     -- Limpar GUI antiga
-    local Existing = CoreGui:FindFirstChild("SoteranoHUB")
+    local Existing = PlayerGui:FindFirstChild("SoteranoHUB")
     if Existing then Existing:Destroy() end
 
     -- ScreenGui Principal
     ScreenGui = Instance.new("ScreenGui")
     ScreenGui.Name = "SoteranoHUB"
-    ScreenGui.Parent = CoreGui
+    ScreenGui.Parent = PlayerGui
     ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
     ScreenGui.ResetOnSpawn = false
 
@@ -169,45 +141,45 @@ local function CreateUI()
     MainFrame.Name = "MainFrame"
     MainFrame.Parent = ScreenGui
     MainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 30)
-    MainFrame.BackgroundTransparency = 0.05
+    MainFrame.BackgroundTransparency = 0.1
     MainFrame.BorderSizePixel = 0
     MainFrame.Position = UDim2.new(0.02, 0, 0.5, -200)
-    MainFrame.Size = UDim2.new(0, 300, 0, ExpandedHeight)
+    MainFrame.Size = UDim2.new(0, 320, 0, 450)
     MainFrame.ClipsDescendants = true
     MainFrame.Active = true
     MainFrame.Draggable = true
 
-    -- Sombra
+    -- Sombra (opcional, mas compatível)
     local Shadow = Instance.new("ImageLabel")
     Shadow.Name = "Shadow"
     Shadow.Parent = MainFrame
     Shadow.BackgroundTransparency = 1
-    Shadow.Position = UDim2.new(0, -15, 0, -15)
-    Shadow.Size = UDim2.new(1, 30, 1, 30)
+    Shadow.Position = UDim2.new(0, -10, 0, -10)
+    Shadow.Size = UDim2.new(1, 20, 1, 20)
     Shadow.Image = "rbxassetid://1316045217"
     Shadow.ImageColor3 = Color3.fromRGB(0, 0, 0)
-    Shadow.ImageTransparency = 0.5
+    Shadow.ImageTransparency = 0.6
     Shadow.ScaleType = Enum.ScaleType.Slice
     Shadow.SliceCenter = Rect.new(10, 10, 118, 118)
+    Shadow.ZIndex = -1
 
     -- Cantos arredondados
     local MainCorner = Instance.new("UICorner")
     MainCorner.Parent = MainFrame
     MainCorner.CornerRadius = UDim.new(0, 15)
 
-    -- Gradiente de fundo
+    -- Gradiente
     local Gradient = Instance.new("UIGradient")
     Gradient.Parent = MainFrame
     Gradient.Color = ColorSequence.new({
-        ColorSequenceKeypoint.new(0, Color3.fromRGB(30, 30, 40)),
+        ColorSequenceKeypoint.new(0, Color3.fromRGB(35, 35, 45)),
         ColorSequenceKeypoint.new(1, Color3.fromRGB(15, 15, 25))
     })
-    Gradient.Rotation = 90
 
-    -- Barra de título (para arrastar)
+    -- Barra de título
     local TitleBar = Instance.new("Frame")
     TitleBar.Parent = MainFrame
-    TitleBar.BackgroundColor3 = Color3.fromRGB(40, 40, 55)
+    TitleBar.BackgroundColor3 = Color3.fromRGB(45, 45, 60)
     TitleBar.BackgroundTransparency = 0.2
     TitleBar.BorderSizePixel = 0
     TitleBar.Size = UDim2.new(1, 0, 0, 50)
@@ -229,43 +201,7 @@ local function CreateUI()
     TitleLabel.TextSize = 24
     TitleLabel.TextXAlignment = Enum.TextXAlignment.Left
 
-    -- Botão Minimizar
-    local MinimizeButton = Instance.new("TextButton")
-    MinimizeButton.Parent = TitleBar
-    MinimizeButton.BackgroundColor3 = Color3.fromRGB(255, 180, 0)
-    MinimizeButton.BackgroundTransparency = 0.3
-    MinimizeButton.BorderSizePixel = 0
-    MinimizeButton.Size = UDim2.new(0, 30, 0, 30)
-    MinimizeButton.Position = UDim2.new(1, -80, 0.5, -15)
-    MinimizeButton.Font = Enum.Font.GothamBold
-    MinimizeButton.Text = "−"
-    MinimizeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-    MinimizeButton.TextSize = 20
-    MinimizeButton.AutoButtonColor = false
-
-    local MinCorner = Instance.new("UICorner")
-    MinCorner.Parent = MinimizeButton
-    MinCorner.CornerRadius = UDim.new(0, 8)
-
-    -- Botão Fechar (apenas para esconder)
-    local CloseButton = Instance.new("TextButton")
-    CloseButton.Parent = TitleBar
-    CloseButton.BackgroundColor3 = Color3.fromRGB(255, 80, 80)
-    CloseButton.BackgroundTransparency = 0.3
-    CloseButton.BorderSizePixel = 0
-    CloseButton.Size = UDim2.new(0, 30, 0, 30)
-    CloseButton.Position = UDim2.new(1, -40, 0.5, -15)
-    CloseButton.Font = Enum.Font.GothamBold
-    CloseButton.Text = "×"
-    CloseButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-    CloseButton.TextSize = 20
-    CloseButton.AutoButtonColor = false
-
-    local CloseCorner = Instance.new("UICorner")
-    CloseCorner.Parent = CloseButton
-    CloseCorner.CornerRadius = UDim.new(0, 8)
-
-    -- Container para os controles
+    -- Container
     local Container = Instance.new("ScrollingFrame")
     Container.Name = "Container"
     Container.Parent = MainFrame
@@ -275,264 +211,317 @@ local function CreateUI()
     Container.Size = UDim2.new(1, -20, 1, -70)
     Container.CanvasSize = UDim2.new(0, 0, 2.5, 0)
     Container.ScrollBarThickness = 6
-    Container.ScrollBarImageColor3 = Color3.fromRGB(80, 80, 120)
-    Container.Visible = true
+    Container.ScrollBarImageColor3 = Color3.fromRGB(100, 100, 150)
 
-    -- Função para criar botões de toggle
-    local function CreateToggle(parent, text, setting, callback, color)
-        local ToggleFrame = Instance.new("Frame")
-        ToggleFrame.Parent = parent
-        ToggleFrame.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
-        ToggleFrame.BackgroundTransparency = 0.2
-        ToggleFrame.BorderSizePixel = 0
-        ToggleFrame.Size = UDim2.new(1, -10, 0, 45)
-        ToggleFrame.Position = UDim2.new(0, 5, 0, 0)
+    -- Função para criar botões toggle
+    local function CreateToggle(parent, text, yPos, setting, callback)
+        local frame = Instance.new("Frame")
+        frame.Parent = parent
+        frame.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
+        frame.BackgroundTransparency = 0.2
+        frame.BorderSizePixel = 0
+        frame.Size = UDim2.new(1, -10, 0, 45)
+        frame.Position = UDim2.new(0, 5, 0, yPos)
 
-        local ToggleCorner = Instance.new("UICorner")
-        ToggleCorner.Parent = ToggleFrame
-        ToggleCorner.CornerRadius = UDim.new(0, 10)
+        local corner = Instance.new("UICorner")
+        corner.Parent = frame
+        corner.CornerRadius = UDim.new(0, 10)
 
-        local Label = Instance.new("TextLabel")
-        Label.Parent = ToggleFrame
-        Label.BackgroundTransparency = 1
-        Label.Size = UDim2.new(0.7, -10, 1, 0)
-        Label.Position = UDim2.new(0, 15, 0, 0)
-        Label.Font = Enum.Font.Gotham
-        Label.Text = text
-        Label.TextColor3 = Color3.fromRGB(240, 240, 240)
-        Label.TextSize = 16
-        Label.TextXAlignment = Enum.TextXAlignment.Left
+        local label = Instance.new("TextLabel")
+        label.Parent = frame
+        label.BackgroundTransparency = 1
+        label.Size = UDim2.new(0.7, -10, 1, 0)
+        label.Position = UDim2.new(0, 15, 0, 0)
+        label.Font = Enum.Font.Gotham
+        label.Text = text
+        label.TextColor3 = Color3.fromRGB(255, 255, 255)
+        label.TextSize = 16
+        label.TextXAlignment = Enum.TextXAlignment.Left
 
-        local ToggleButton = Instance.new("TextButton")
-        ToggleButton.Parent = ToggleFrame
-        ToggleButton.BackgroundColor3 = setting and Color3.fromRGB(0, 200, 100) or Color3.fromRGB(180, 70, 70)
-        ToggleButton.BorderSizePixel = 0
-        ToggleButton.Size = UDim2.new(0.25, -10, 0, 28)
-        ToggleButton.Position = UDim2.new(0.75, 0, 0.5, -14)
-        ToggleButton.Font = Enum.Font.GothamBold
-        ToggleButton.Text = setting and "ON" or "OFF"
-        ToggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-        ToggleButton.TextSize = 14
-        ToggleButton.AutoButtonColor = false
+        local button = Instance.new("TextButton")
+        button.Parent = frame
+        button.BackgroundColor3 = setting and Color3.fromRGB(0, 200, 100) or Color3.fromRGB(200, 70, 70)
+        button.BorderSizePixel = 0
+        button.Size = UDim2.new(0.25, -10, 0, 28)
+        button.Position = UDim2.new(0.75, 0, 0.5, -14)
+        button.Font = Enum.Font.GothamBold
+        button.Text = setting and "ON" or "OFF"
+        button.TextColor3 = Color3.fromRGB(255, 255, 255)
+        button.TextSize = 14
 
-        local ButtonCorner = Instance.new("UICorner")
-        ButtonCorner.Parent = ToggleButton
-        ButtonCorner.CornerRadius = UDim.new(0, 8)
+        local btnCorner = Instance.new("UICorner")
+        btnCorner.Parent = button
+        btnCorner.CornerRadius = UDim.new(0, 8)
 
-        ToggleButton.MouseButton1Click:Connect(function()
+        button.MouseButton1Click:Connect(function()
             setting = not setting
-            ToggleButton.BackgroundColor3 = setting and Color3.fromRGB(0, 200, 100) or Color3.fromRGB(180, 70, 70)
-            ToggleButton.Text = setting and "ON" or "OFF"
+            button.BackgroundColor3 = setting and Color3.fromRGB(0, 200, 100) or Color3.fromRGB(200, 70, 70)
+            button.Text = setting and "ON" or "OFF"
             if callback then callback(setting) end
         end)
 
-        return ToggleFrame
+        return frame, 50
     end
 
-    -- Função para criar sliders
-    local function CreateSlider(parent, text, min, max, setting, callback)
-        local SliderFrame = Instance.new("Frame")
-        SliderFrame.Parent = parent
-        SliderFrame.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
-        SliderFrame.BackgroundTransparency = 0.2
-        SliderFrame.BorderSizePixel = 0
-        SliderFrame.Size = UDim2.new(1, -10, 0, 70)
-        SliderFrame.Position = UDim2.new(0, 5, 0, 0)
+    -- Função para criar slider
+    local function CreateSlider(parent, text, yPos, min, max, setting, callback)
+        local frame = Instance.new("Frame")
+        frame.Parent = parent
+        frame.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
+        frame.BackgroundTransparency = 0.2
+        frame.BorderSizePixel = 0
+        frame.Size = UDim2.new(1, -10, 0, 70)
+        frame.Position = UDim2.new(0, 5, 0, yPos)
 
-        local SliderCorner = Instance.new("UICorner")
-        SliderCorner.Parent = SliderFrame
-        SliderCorner.CornerRadius = UDim.new(0, 10)
+        local corner = Instance.new("UICorner")
+        corner.Parent = frame
+        corner.CornerRadius = UDim.new(0, 10)
 
-        local Label = Instance.new("TextLabel")
-        Label.Parent = SliderFrame
-        Label.BackgroundTransparency = 1
-        Label.Size = UDim2.new(1, -20, 0, 20)
-        Label.Position = UDim2.new(0, 15, 0, 10)
-        Label.Font = Enum.Font.Gotham
-        Label.Text = text .. ": " .. tostring(setting)
-        Label.TextColor3 = Color3.fromRGB(240, 240, 240)
-        Label.TextSize = 16
-        Label.TextXAlignment = Enum.TextXAlignment.Left
+        local label = Instance.new("TextLabel")
+        label.Parent = frame
+        label.BackgroundTransparency = 1
+        label.Size = UDim2.new(1, -20, 0, 20)
+        label.Position = UDim2.new(0, 15, 0, 10)
+        label.Font = Enum.Font.Gotham
+        label.Text = text .. ": " .. tostring(setting)
+        label.TextColor3 = Color3.fromRGB(255, 255, 255)
+        label.TextSize = 16
+        label.TextXAlignment = Enum.TextXAlignment.Left
 
-        local BarBackground = Instance.new("Frame")
-        BarBackground.Parent = SliderFrame
-        BarBackground.BackgroundColor3 = Color3.fromRGB(60, 60, 75)
-        BarBackground.BorderSizePixel = 0
-        BarBackground.Size = UDim2.new(0.9, 0, 0, 5)
-        BarBackground.Position = UDim2.new(0.05, 0, 0.6, 0)
+        local barBg = Instance.new("Frame")
+        barBg.Parent = frame
+        barBg.BackgroundColor3 = Color3.fromRGB(70, 70, 85)
+        barBg.BorderSizePixel = 0
+        barBg.Size = UDim2.new(0.9, 0, 0, 5)
+        barBg.Position = UDim2.new(0.05, 0, 0.6, 0)
 
-        local BarCorner = Instance.new("UICorner")
-        BarCorner.Parent = BarBackground
-        BarCorner.CornerRadius = UDim.new(0, 3)
+        local barCorner = Instance.new("UICorner")
+        barCorner.Parent = barBg
+        barCorner.CornerRadius = UDim.new(0, 3)
 
-        local BarFill = Instance.new("Frame")
-        BarFill.Parent = BarBackground
-        BarFill.BackgroundColor3 = Color3.fromRGB(0, 160, 255)
-        BarFill.BorderSizePixel = 0
-        BarFill.Size = UDim2.new((setting - min) / (max - min), 0, 1, 0)
+        local barFill = Instance.new("Frame")
+        barFill.Parent = barBg
+        barFill.BackgroundColor3 = Color3.fromRGB(0, 160, 255)
+        barFill.BorderSizePixel = 0
+        barFill.Size = UDim2.new((setting - min) / (max - min), 0, 1, 0)
 
-        local FillCorner = Instance.new("UICorner")
-        FillCorner.Parent = BarFill
-        FillCorner.CornerRadius = UDim.new(0, 3)
+        local fillCorner = Instance.new("UICorner")
+        fillCorner.Parent = barFill
+        fillCorner.CornerRadius = UDim.new(0, 3)
 
-        local ValueLabel = Instance.new("TextLabel")
-        ValueLabel.Parent = SliderFrame
-        ValueLabel.BackgroundTransparency = 1
-        ValueLabel.Size = UDim2.new(1, -30, 0, 20)
-        ValueLabel.Position = UDim2.new(0, 15, 0, 35)
-        ValueLabel.Font = Enum.Font.Gotham
-        ValueLabel.Text = tostring(math.floor(setting))
-        ValueLabel.TextColor3 = Color3.fromRGB(0, 160, 255)
-        ValueLabel.TextSize = 18
-        ValueLabel.TextXAlignment = Enum.TextXAlignment.Right
+        local valueLabel = Instance.new("TextLabel")
+        valueLabel.Parent = frame
+        valueLabel.BackgroundTransparency = 1
+        valueLabel.Size = UDim2.new(1, -30, 0, 20)
+        valueLabel.Position = UDim2.new(0, 15, 0, 35)
+        valueLabel.Font = Enum.Font.Gotham
+        valueLabel.Text = tostring(math.floor(setting))
+        valueLabel.TextColor3 = Color3.fromRGB(0, 160, 255)
+        valueLabel.TextSize = 18
+        valueLabel.TextXAlignment = Enum.TextXAlignment.Right
 
         local dragging = false
-        BarBackground.InputBegan:Connect(function(input)
+        barBg.InputBegan:Connect(function(input)
             if input.UserInputType == Enum.UserInputType.MouseButton1 then
                 dragging = true
             end
         end)
 
-        BarBackground.InputEnded:Connect(function(input)
+        barBg.InputEnded:Connect(function(input)
             if input.UserInputType == Enum.UserInputType.MouseButton1 then
                 dragging = false
             end
         end)
 
-        UserInputService.InputChanged:Connect(function(input)
-            if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+        RunService.RenderStepped:Connect(function()
+            if dragging then
                 local mousePos = UserInputService:GetMouseLocation()
-                local absPos = BarBackground.AbsolutePosition
-                local sizeX = BarBackground.AbsoluteSize.X
+                local absPos = barBg.AbsolutePosition
+                local sizeX = barBg.AbsoluteSize.X
                 local relativeX = math.clamp(mousePos.X - absPos.X, 0, sizeX)
                 local newValue = min + (relativeX / sizeX) * (max - min)
                 newValue = math.floor(newValue)
-                Label.Text = text .. ": " .. tostring(newValue)
-                ValueLabel.Text = tostring(newValue)
-                BarFill.Size = UDim2.new(relativeX / sizeX, 0, 1, 0)
+                label.Text = text .. ": " .. tostring(newValue)
+                valueLabel.Text = tostring(newValue)
+                barFill.Size = UDim2.new(relativeX / sizeX, 0, 1, 0)
                 if callback then callback(newValue) end
             end
         end)
 
-        return SliderFrame
+        return frame, 75
     end
 
-    -- Criar os elementos da UI
-    local YPos = 0
+    -- Posicionar elementos
+    local yPos = 0
 
     -- Seção Aimbot
-    local AimSection = Instance.new("TextLabel")
-    AimSection.Parent = Container
-    AimSection.BackgroundTransparency = 1
-    AimSection.Size = UDim2.new(1, 0, 0, 30)
-    AimSection.Position = UDim2.new(0, 0, 0, YPos)
-    AimSection.Font = Enum.Font.GothamBold
-    AimSection.Text = "⚡ Aimbot"
-    AimSection.TextColor3 = Color3.fromRGB(100, 200, 255)
-    AimSection.TextSize = 22
-    AimSection.TextXAlignment = Enum.TextXAlignment.Left
-    YPos = YPos + 35
+    local aimSection = Instance.new("TextLabel")
+    aimSection.Parent = Container
+    aimSection.BackgroundTransparency = 1
+    aimSection.Size = UDim2.new(1, 0, 0, 30)
+    aimSection.Position = UDim2.new(0, 0, 0, yPos)
+    aimSection.Font = Enum.Font.GothamBold
+    aimSection.Text = "⚡ Aimbot"
+    aimSection.TextColor3 = Color3.fromRGB(100, 200, 255)
+    aimSection.TextSize = 22
+    aimSection.TextXAlignment = Enum.TextXAlignment.Left
+    yPos = yPos + 35
 
     -- Toggle Aimbot
-    local AimbotToggle = CreateToggle(Container, "Ativar Aimbot", Settings.AimbotEnabled, function(value)
+    local aimFrame, aimHeight = CreateToggle(Container, "Ativar Aimbot", yPos, Settings.AimbotEnabled, function(value)
         Settings.AimbotEnabled = value
-        if FOVCircle then
-            FOVCircle.Visible = value and Settings.FOVEnabled
-        end
-        if not value then
-            CurrentTarget = nil
-        end
     end)
-    AimbotToggle.Position = UDim2.new(0, 0, 0, YPos)
-    YPos = YPos + 50
+    yPos = yPos + aimHeight
 
     -- Toggle FOV
-    local FOVToggle = CreateToggle(Container, "Mostrar FOV", Settings.FOVEnabled, function(value)
+    local fovToggleFrame, fovToggleHeight = CreateToggle(Container, "Mostrar FOV", yPos, Settings.FOVEnabled, function(value)
         Settings.FOVEnabled = value
-        if FOVCircle then
-            FOVCircle.Visible = value and Settings.AimbotEnabled
-        end
     end)
-    FOVToggle.Position = UDim2.new(0, 0, 0, YPos)
-    YPos = YPos + 50
+    yPos = yPos + fovToggleHeight
 
     -- Slider FOV
-    local FOVSlider = CreateSlider(Container, "Tamanho FOV", 50, 400, Settings.FOVRadius, function(value)
+    local fovSliderFrame, fovSliderHeight = CreateSlider(Container, "Tamanho FOV", yPos, 50, 400, Settings.FOVRadius, function(value)
         Settings.FOVRadius = value
-        if FOVCircle then
-            FOVCircle.Size = UDim2.new(0, value * 2, 0, value * 2)
-            FOVCircle.Position = UDim2.new(0.5, -value, 0.5, -value)
-        end
     end)
-    FOVSlider.Position = UDim2.new(0, 0, 0, YPos)
-    YPos = YPos + 75
+    yPos = yPos + fovSliderHeight
 
     -- Wall Check
-    local WallCheckToggle = CreateToggle(Container, "Wall Check", Settings.WallCheck, function(value)
+    local wallFrame, wallHeight = CreateToggle(Container, "Wall Check", yPos, Settings.WallCheck, function(value)
         Settings.WallCheck = value
     end)
-    WallCheckToggle.Position = UDim2.new(0, 0, 0, YPos)
-    YPos = YPos + 50
+    yPos = yPos + wallHeight
 
     -- Team Check
-    local TeamCheckToggle = CreateToggle(Container, "Team Check", Settings.TeamCheck, function(value)
+    local teamFrame, teamHeight = CreateToggle(Container, "Team Check", yPos, Settings.TeamCheck, function(value)
         Settings.TeamCheck = value
     end)
-    TeamCheckToggle.Position = UDim2.new(0, 0, 0, YPos)
-    YPos = YPos + 50
+    yPos = yPos + teamHeight
 
     -- Seção ESP
-    local EspSection = Instance.new("TextLabel")
-    EspSection.Parent = Container
-    EspSection.BackgroundTransparency = 1
-    EspSection.Size = UDim2.new(1, 0, 0, 30)
-    EspSection.Position = UDim2.new(0, 0, 0, YPos)
-    EspSection.Font = Enum.Font.GothamBold
-    EspSection.Text = "👁️ ESP"
-    EspSection.TextColor3 = Color3.fromRGB(100, 255, 150)
-    EspSection.TextSize = 22
-    EspSection.TextXAlignment = Enum.TextXAlignment.Left
-    YPos = YPos + 35
+    local espSection = Instance.new("TextLabel")
+    espSection.Parent = Container
+    espSection.BackgroundTransparency = 1
+    espSection.Size = UDim2.new(1, 0, 0, 30)
+    espSection.Position = UDim2.new(0, 0, 0, yPos)
+    espSection.Font = Enum.Font.GothamBold
+    espSection.Text = "👁️ ESP"
+    espSection.TextColor3 = Color3.fromRGB(100, 255, 150)
+    espSection.TextSize = 22
+    espSection.TextXAlignment = Enum.TextXAlignment.Left
+    yPos = yPos + 35
 
-    local ESPToggle = CreateToggle(Container, "Ativar ESP", Settings.ESPEnabled, function(value)
+    -- Toggle ESP
+    local espFrame, espHeight = CreateToggle(Container, "Ativar ESP", yPos, Settings.ESPEnabled, function(value)
         Settings.ESPEnabled = value
     end)
-    ESPToggle.Position = UDim2.new(0, 0, 0, YPos)
+    yPos = yPos + espHeight
 
-    Container.CanvasSize = UDim2.new(0, 0, 0, YPos + 100)
+    -- Ajustar canvas size
+    Container.CanvasSize = UDim2.new(0, 0, 0, yPos + 20)
 
-    -- Funcionalidade do botão minimizar
-    MinimizeButton.MouseButton1Click:Connect(function()
-        Settings.Minimized = not Settings.Minimized
-        
-        local targetHeight = Settings.Minimized and MinimizedHeight or ExpandedHeight
-        local targetTransparency = Settings.Minimized and 1 or 0
-        
-        TweenService:Create(MainFrame, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-            Size = UDim2.new(0, 300, 0, targetHeight)
-        }):Play()
-        
-        TweenService:Create(Container, TweenInfo.new(0.2), {
-            Visible = not Settings.Minimized
-        }):Play()
-        
-        MinimizeButton.Text = Settings.Minimized and "□" or "−"
-    end)
+    print("✅ Interface Soterano HUB criada com sucesso!")
+end
 
-    -- Botão fechar (esconde a UI)
-    CloseButton.MouseButton1Click:Connect(function()
-        MainFrame.Visible = false
-    end)
+-- Função para criar círculo FOV
+local function UpdateFOVCircle()
+    if Settings.AimbotEnabled and Settings.FOVEnabled then
+        if not FOVCircle then
+            FOVCircle = Instance.new("Frame")
+            FOVCircle.Name = "FOVCircle"
+            FOVCircle.Parent = ScreenGui
+            FOVCircle.BackgroundTransparency = 1
+            FOVCircle.BorderSizePixel = 2
+            FOVCircle.BorderColor3 = Settings.FOVColor
+            FOVCircle.Size = UDim2.new(0, Settings.FOVRadius * 2, 0, Settings.FOVRadius * 2)
+            FOVCircle.Position = UDim2.new(0.5, -Settings.FOVRadius, 0.5, -Settings.FOVRadius)
+            FOVCircle.ZIndex = 1000
+
+            local circleCorner = Instance.new("UICorner")
+            circleCorner.Parent = FOVCircle
+            circleCorner.CornerRadius = UDim.new(0.5, 0)
+            
+            local stroke = Instance.new("UIStroke")
+            stroke.Parent = FOVCircle
+            stroke.Color = Settings.FOVColor
+            stroke.Thickness = 2
+        end
+    elseif FOVCircle then
+        FOVCircle:Destroy()
+        FOVCircle = nil
+    end
 end
 
 -- Função ESP
 local function UpdateESP()
+    if not Settings.ESPEnabled then
+        -- Limpar ESP antigo
+        for _, part in pairs(ESPCache) do
+            pcall(function() part:Destroy() end)
+        end
+        ESPCache = {}
+        return
+    end
+    
     for _, player in ipairs(Players:GetPlayers()) do
         if player ~= LocalPlayer and IsPlayerAlive(player) and not IsTeamMate(player) then
             local character = player.Character
-            if character and Settings.ESPEnabled then
+            if character then
                 for _, part in ipairs(character:GetChildren()) do
                     if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
-                        if not part:FindFirstChild("ESP_Outline") then
+                        local key = part:GetFullName()
+                        if not ESPCache[key] then
                             local highlight = Instance.new("BoxHandleAdornment")
-                            highlight.Name
+                            highlight.Name = "ESP_Outline"
+                            highlight.Adornee = part
+                            highlight.ZIndex = 10
+                            highlight.Size = part.Size + Vector3.new(0.1, 0.1, 0.1)
+                            highlight.Color3 = Color3.fromRGB(255, 50, 50)
+                            highlight.Transparency = 0.4
+                            highlight.AlwaysOnTop = true
+                            highlight.Parent = part
+                            ESPCache[key] = highlight
+                        end
+                    end
+                end
+            end
+        end
+    end
+end
+
+-- Loop principal
+RunService.RenderStepped:Connect(function()
+    -- Atualizar FOV Circle
+    UpdateFOVCircle()
+    
+    -- Aimbot
+    if Settings.AimbotEnabled then
+        local target = GetClosestTarget()
+        if target and target.Character then
+            local head = target.Character:FindFirstChild("Head")
+            if head then
+                -- Mira suave
+                local targetPos = head.Position
+                Camera.CFrame = CFrame.lookAt(Camera.CFrame.Position, targetPos)
+            end
+        end
+    end
+    
+    -- ESP
+    UpdateESP()
+end)
+
+-- Toggle UI com tecla
+UserInputService.InputBegan:Connect(function(input)
+    if input.KeyCode == Settings.ToggleKey then
+        if MainFrame then
+            MainFrame.Visible = not MainFrame.Visible
+        end
+    end
+end)
+
+-- Inicializar
+pcall(function()
+    CreateUI()
+    print("🚀 Soterano HUB carregado com sucesso!")
+    print("📌 Pressione RightShift para abrir/fechar")
+end)
