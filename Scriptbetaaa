@@ -1,0 +1,538 @@
+--[[
+    Soterano HUB - Premium Edition
+    Aimbot Perfeito | FOV Ajustável | Interface Minimizável
+--]]
+
+-- Services
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local CoreGui = game:GetService("CoreGui")
+local LocalPlayer = Players.LocalPlayer
+local Camera = workspace.CurrentCamera
+
+-- Configurações
+local Settings = {
+    AimbotEnabled = false,
+    FOVEnabled = true,
+    FOVRadius = 150,
+    FOVColor = Color3.fromRGB(0, 200, 255),
+    WallCheck = false,
+    TeamCheck = true,
+    ESPEnabled = false,
+    TargetPart = "Head",
+    ToggleKey = Enum.KeyCode.RightShift,
+    Minimized = false
+}
+
+-- Variáveis Globais
+local Aiming = false
+local CurrentTarget = nil
+local FOVCircle = nil
+local ScreenGui = nil
+local MainFrame = nil
+local MinimizedHeight = 50
+local ExpandedHeight = 400
+
+-- Função para verificar se o jogador está vivo
+local function IsPlayerAlive(player)
+    return player.Character and 
+           player.Character:FindFirstChild("Humanoid") and 
+           player.Character.Humanoid.Health > 0 and
+           player.Character:FindFirstChild("Head")
+end
+
+-- Função para verificar se é do mesmo time
+local function IsTeamMate(player)
+    if not Settings.TeamCheck then return false end
+    if player.Team == nil or LocalPlayer.Team == nil then return false end
+    return player.Team == LocalPlayer.Team
+end
+
+-- Função melhorada para verificar visibilidade (Wall Check)
+local function IsTargetVisible(character)
+    if not Settings.WallCheck then return true end
+    
+    local head = character:FindFirstChild("Head")
+    if not head then return false end
+    
+    local origin = Camera.CFrame.Position
+    local direction = (head.Position - origin).Unit
+    local ray = Ray.new(origin, direction * 1000)
+    
+    -- Ignorar o próprio personagem e a câmera
+    local ignoreList = {LocalPlayer.Character, Camera}
+    
+    local hit, position, normal = workspace:FindPartOnRayWithIgnoreList(ray, ignoreList)
+    
+    if hit then
+        -- Se acertou algo que é descendente do personagem alvo, está visível
+        if hit:IsDescendantOf(character) then
+            return true
+        end
+        return false
+    end
+    return true
+end
+
+-- Função melhorada para encontrar o alvo mais próximo dentro do FOV
+local function GetClosestTargetToFOV()
+    local closestPlayer = nil
+    local shortestDistance = Settings.FOVRadius
+    local center = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+    
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and IsPlayerAlive(player) and not IsTeamMate(player) then
+            
+            local character = player.Character
+            local head = character:FindFirstChild("Head")
+            
+            if head then
+                -- Verificar visibilidade se Wall Check estiver ativado
+                if Settings.WallCheck and not IsTargetVisible(character) then
+                    continue
+                end
+                
+                local screenPos, onScreen = Camera:WorldToScreenPoint(head.Position)
+                
+                if onScreen then
+                    local distance = (Vector2.new(screenPos.X, screenPos.Y) - center).Magnitude
+                    
+                    -- Se FOV estiver desativado, considera qualquer distância
+                    if not Settings.FOVEnabled then
+                        if not closestPlayer then
+                            closestPlayer = player
+                            shortestDistance = distance
+                        end
+                    else
+                        if distance < shortestDistance then
+                            shortestDistance = distance
+                            closestPlayer = player
+                        end
+                    end
+                end
+            end
+        end
+    end
+    
+    return closestPlayer
+end
+
+-- Função para criar o círculo FOV
+local function CreateFOVCircle()
+    if FOVCircle then 
+        FOVCircle:Destroy()
+        FOVCircle = nil
+    end
+    
+    if not ScreenGui then return end
+    
+    FOVCircle = Instance.new("Frame")
+    FOVCircle.Name = "FOVCircle"
+    FOVCircle.Parent = ScreenGui
+    FOVCircle.BackgroundTransparency = 1
+    FOVCircle.BorderSizePixel = 2
+    FOVCircle.BorderColor3 = Settings.FOVColor
+    FOVCircle.Size = UDim2.new(0, Settings.FOVRadius * 2, 0, Settings.FOVRadius * 2)
+    FOVCircle.Position = UDim2.new(0.5, -Settings.FOVRadius, 0.5, -Settings.FOVRadius)
+    FOVCircle.ZIndex = 1000
+    FOVCircle.Visible = Settings.FOVEnabled and Settings.AimbotEnabled
+
+    local CircleCorner = Instance.new("UICorner")
+    CircleCorner.Parent = FOVCircle
+    CircleCorner.CornerRadius = UDim.new(0.5, 0)
+    
+    -- Adicionar um brilho sutil
+    local Stroke = Instance.new("UIStroke")
+    Stroke.Parent = FOVCircle
+    Stroke.Color = Settings.FOVColor
+    Stroke.Thickness = 1.5
+    Stroke.Transparency = 0.3
+end
+
+-- Função para criar a interface
+local function CreateUI()
+    -- Limpar GUI antiga
+    local Existing = CoreGui:FindFirstChild("SoteranoHUB")
+    if Existing then Existing:Destroy() end
+
+    -- ScreenGui Principal
+    ScreenGui = Instance.new("ScreenGui")
+    ScreenGui.Name = "SoteranoHUB"
+    ScreenGui.Parent = CoreGui
+    ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    ScreenGui.ResetOnSpawn = false
+
+    -- Frame Principal
+    MainFrame = Instance.new("Frame")
+    MainFrame.Name = "MainFrame"
+    MainFrame.Parent = ScreenGui
+    MainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 30)
+    MainFrame.BackgroundTransparency = 0.05
+    MainFrame.BorderSizePixel = 0
+    MainFrame.Position = UDim2.new(0.02, 0, 0.5, -200)
+    MainFrame.Size = UDim2.new(0, 300, 0, ExpandedHeight)
+    MainFrame.ClipsDescendants = true
+    MainFrame.Active = true
+    MainFrame.Draggable = true
+
+    -- Sombra
+    local Shadow = Instance.new("ImageLabel")
+    Shadow.Name = "Shadow"
+    Shadow.Parent = MainFrame
+    Shadow.BackgroundTransparency = 1
+    Shadow.Position = UDim2.new(0, -15, 0, -15)
+    Shadow.Size = UDim2.new(1, 30, 1, 30)
+    Shadow.Image = "rbxassetid://1316045217"
+    Shadow.ImageColor3 = Color3.fromRGB(0, 0, 0)
+    Shadow.ImageTransparency = 0.5
+    Shadow.ScaleType = Enum.ScaleType.Slice
+    Shadow.SliceCenter = Rect.new(10, 10, 118, 118)
+
+    -- Cantos arredondados
+    local MainCorner = Instance.new("UICorner")
+    MainCorner.Parent = MainFrame
+    MainCorner.CornerRadius = UDim.new(0, 15)
+
+    -- Gradiente de fundo
+    local Gradient = Instance.new("UIGradient")
+    Gradient.Parent = MainFrame
+    Gradient.Color = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, Color3.fromRGB(30, 30, 40)),
+        ColorSequenceKeypoint.new(1, Color3.fromRGB(15, 15, 25))
+    })
+    Gradient.Rotation = 90
+
+    -- Barra de título (para arrastar)
+    local TitleBar = Instance.new("Frame")
+    TitleBar.Parent = MainFrame
+    TitleBar.BackgroundColor3 = Color3.fromRGB(40, 40, 55)
+    TitleBar.BackgroundTransparency = 0.2
+    TitleBar.BorderSizePixel = 0
+    TitleBar.Size = UDim2.new(1, 0, 0, 50)
+    TitleBar.Position = UDim2.new(0, 0, 0, 0)
+
+    local TitleCorner = Instance.new("UICorner")
+    TitleCorner.Parent = TitleBar
+    TitleCorner.CornerRadius = UDim.new(0, 15)
+
+    -- Título
+    local TitleLabel = Instance.new("TextLabel")
+    TitleLabel.Parent = TitleBar
+    TitleLabel.BackgroundTransparency = 1
+    TitleLabel.Size = UDim2.new(0.7, -20, 1, 0)
+    TitleLabel.Position = UDim2.new(0, 20, 0, 0)
+    TitleLabel.Font = Enum.Font.GothamBold
+    TitleLabel.Text = "Soterano HUB"
+    TitleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+    TitleLabel.TextSize = 24
+    TitleLabel.TextXAlignment = Enum.TextXAlignment.Left
+
+    -- Botão Minimizar
+    local MinimizeButton = Instance.new("TextButton")
+    MinimizeButton.Parent = TitleBar
+    MinimizeButton.BackgroundColor3 = Color3.fromRGB(255, 180, 0)
+    MinimizeButton.BackgroundTransparency = 0.3
+    MinimizeButton.BorderSizePixel = 0
+    MinimizeButton.Size = UDim2.new(0, 30, 0, 30)
+    MinimizeButton.Position = UDim2.new(1, -80, 0.5, -15)
+    MinimizeButton.Font = Enum.Font.GothamBold
+    MinimizeButton.Text = "−"
+    MinimizeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+    MinimizeButton.TextSize = 20
+    MinimizeButton.AutoButtonColor = false
+
+    local MinCorner = Instance.new("UICorner")
+    MinCorner.Parent = MinimizeButton
+    MinCorner.CornerRadius = UDim.new(0, 8)
+
+    -- Botão Fechar (apenas para esconder)
+    local CloseButton = Instance.new("TextButton")
+    CloseButton.Parent = TitleBar
+    CloseButton.BackgroundColor3 = Color3.fromRGB(255, 80, 80)
+    CloseButton.BackgroundTransparency = 0.3
+    CloseButton.BorderSizePixel = 0
+    CloseButton.Size = UDim2.new(0, 30, 0, 30)
+    CloseButton.Position = UDim2.new(1, -40, 0.5, -15)
+    CloseButton.Font = Enum.Font.GothamBold
+    CloseButton.Text = "×"
+    CloseButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+    CloseButton.TextSize = 20
+    CloseButton.AutoButtonColor = false
+
+    local CloseCorner = Instance.new("UICorner")
+    CloseCorner.Parent = CloseButton
+    CloseCorner.CornerRadius = UDim.new(0, 8)
+
+    -- Container para os controles
+    local Container = Instance.new("ScrollingFrame")
+    Container.Name = "Container"
+    Container.Parent = MainFrame
+    Container.BackgroundTransparency = 1
+    Container.BorderSizePixel = 0
+    Container.Position = UDim2.new(0, 10, 0, 60)
+    Container.Size = UDim2.new(1, -20, 1, -70)
+    Container.CanvasSize = UDim2.new(0, 0, 2.5, 0)
+    Container.ScrollBarThickness = 6
+    Container.ScrollBarImageColor3 = Color3.fromRGB(80, 80, 120)
+    Container.Visible = true
+
+    -- Função para criar botões de toggle
+    local function CreateToggle(parent, text, setting, callback, color)
+        local ToggleFrame = Instance.new("Frame")
+        ToggleFrame.Parent = parent
+        ToggleFrame.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
+        ToggleFrame.BackgroundTransparency = 0.2
+        ToggleFrame.BorderSizePixel = 0
+        ToggleFrame.Size = UDim2.new(1, -10, 0, 45)
+        ToggleFrame.Position = UDim2.new(0, 5, 0, 0)
+
+        local ToggleCorner = Instance.new("UICorner")
+        ToggleCorner.Parent = ToggleFrame
+        ToggleCorner.CornerRadius = UDim.new(0, 10)
+
+        local Label = Instance.new("TextLabel")
+        Label.Parent = ToggleFrame
+        Label.BackgroundTransparency = 1
+        Label.Size = UDim2.new(0.7, -10, 1, 0)
+        Label.Position = UDim2.new(0, 15, 0, 0)
+        Label.Font = Enum.Font.Gotham
+        Label.Text = text
+        Label.TextColor3 = Color3.fromRGB(240, 240, 240)
+        Label.TextSize = 16
+        Label.TextXAlignment = Enum.TextXAlignment.Left
+
+        local ToggleButton = Instance.new("TextButton")
+        ToggleButton.Parent = ToggleFrame
+        ToggleButton.BackgroundColor3 = setting and Color3.fromRGB(0, 200, 100) or Color3.fromRGB(180, 70, 70)
+        ToggleButton.BorderSizePixel = 0
+        ToggleButton.Size = UDim2.new(0.25, -10, 0, 28)
+        ToggleButton.Position = UDim2.new(0.75, 0, 0.5, -14)
+        ToggleButton.Font = Enum.Font.GothamBold
+        ToggleButton.Text = setting and "ON" or "OFF"
+        ToggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+        ToggleButton.TextSize = 14
+        ToggleButton.AutoButtonColor = false
+
+        local ButtonCorner = Instance.new("UICorner")
+        ButtonCorner.Parent = ToggleButton
+        ButtonCorner.CornerRadius = UDim.new(0, 8)
+
+        ToggleButton.MouseButton1Click:Connect(function()
+            setting = not setting
+            ToggleButton.BackgroundColor3 = setting and Color3.fromRGB(0, 200, 100) or Color3.fromRGB(180, 70, 70)
+            ToggleButton.Text = setting and "ON" or "OFF"
+            if callback then callback(setting) end
+        end)
+
+        return ToggleFrame
+    end
+
+    -- Função para criar sliders
+    local function CreateSlider(parent, text, min, max, setting, callback)
+        local SliderFrame = Instance.new("Frame")
+        SliderFrame.Parent = parent
+        SliderFrame.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
+        SliderFrame.BackgroundTransparency = 0.2
+        SliderFrame.BorderSizePixel = 0
+        SliderFrame.Size = UDim2.new(1, -10, 0, 70)
+        SliderFrame.Position = UDim2.new(0, 5, 0, 0)
+
+        local SliderCorner = Instance.new("UICorner")
+        SliderCorner.Parent = SliderFrame
+        SliderCorner.CornerRadius = UDim.new(0, 10)
+
+        local Label = Instance.new("TextLabel")
+        Label.Parent = SliderFrame
+        Label.BackgroundTransparency = 1
+        Label.Size = UDim2.new(1, -20, 0, 20)
+        Label.Position = UDim2.new(0, 15, 0, 10)
+        Label.Font = Enum.Font.Gotham
+        Label.Text = text .. ": " .. tostring(setting)
+        Label.TextColor3 = Color3.fromRGB(240, 240, 240)
+        Label.TextSize = 16
+        Label.TextXAlignment = Enum.TextXAlignment.Left
+
+        local BarBackground = Instance.new("Frame")
+        BarBackground.Parent = SliderFrame
+        BarBackground.BackgroundColor3 = Color3.fromRGB(60, 60, 75)
+        BarBackground.BorderSizePixel = 0
+        BarBackground.Size = UDim2.new(0.9, 0, 0, 5)
+        BarBackground.Position = UDim2.new(0.05, 0, 0.6, 0)
+
+        local BarCorner = Instance.new("UICorner")
+        BarCorner.Parent = BarBackground
+        BarCorner.CornerRadius = UDim.new(0, 3)
+
+        local BarFill = Instance.new("Frame")
+        BarFill.Parent = BarBackground
+        BarFill.BackgroundColor3 = Color3.fromRGB(0, 160, 255)
+        BarFill.BorderSizePixel = 0
+        BarFill.Size = UDim2.new((setting - min) / (max - min), 0, 1, 0)
+
+        local FillCorner = Instance.new("UICorner")
+        FillCorner.Parent = BarFill
+        FillCorner.CornerRadius = UDim.new(0, 3)
+
+        local ValueLabel = Instance.new("TextLabel")
+        ValueLabel.Parent = SliderFrame
+        ValueLabel.BackgroundTransparency = 1
+        ValueLabel.Size = UDim2.new(1, -30, 0, 20)
+        ValueLabel.Position = UDim2.new(0, 15, 0, 35)
+        ValueLabel.Font = Enum.Font.Gotham
+        ValueLabel.Text = tostring(math.floor(setting))
+        ValueLabel.TextColor3 = Color3.fromRGB(0, 160, 255)
+        ValueLabel.TextSize = 18
+        ValueLabel.TextXAlignment = Enum.TextXAlignment.Right
+
+        local dragging = false
+        BarBackground.InputBegan:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1 then
+                dragging = true
+            end
+        end)
+
+        BarBackground.InputEnded:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1 then
+                dragging = false
+            end
+        end)
+
+        UserInputService.InputChanged:Connect(function(input)
+            if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+                local mousePos = UserInputService:GetMouseLocation()
+                local absPos = BarBackground.AbsolutePosition
+                local sizeX = BarBackground.AbsoluteSize.X
+                local relativeX = math.clamp(mousePos.X - absPos.X, 0, sizeX)
+                local newValue = min + (relativeX / sizeX) * (max - min)
+                newValue = math.floor(newValue)
+                Label.Text = text .. ": " .. tostring(newValue)
+                ValueLabel.Text = tostring(newValue)
+                BarFill.Size = UDim2.new(relativeX / sizeX, 0, 1, 0)
+                if callback then callback(newValue) end
+            end
+        end)
+
+        return SliderFrame
+    end
+
+    -- Criar os elementos da UI
+    local YPos = 0
+
+    -- Seção Aimbot
+    local AimSection = Instance.new("TextLabel")
+    AimSection.Parent = Container
+    AimSection.BackgroundTransparency = 1
+    AimSection.Size = UDim2.new(1, 0, 0, 30)
+    AimSection.Position = UDim2.new(0, 0, 0, YPos)
+    AimSection.Font = Enum.Font.GothamBold
+    AimSection.Text = "⚡ Aimbot"
+    AimSection.TextColor3 = Color3.fromRGB(100, 200, 255)
+    AimSection.TextSize = 22
+    AimSection.TextXAlignment = Enum.TextXAlignment.Left
+    YPos = YPos + 35
+
+    -- Toggle Aimbot
+    local AimbotToggle = CreateToggle(Container, "Ativar Aimbot", Settings.AimbotEnabled, function(value)
+        Settings.AimbotEnabled = value
+        if FOVCircle then
+            FOVCircle.Visible = value and Settings.FOVEnabled
+        end
+        if not value then
+            CurrentTarget = nil
+        end
+    end)
+    AimbotToggle.Position = UDim2.new(0, 0, 0, YPos)
+    YPos = YPos + 50
+
+    -- Toggle FOV
+    local FOVToggle = CreateToggle(Container, "Mostrar FOV", Settings.FOVEnabled, function(value)
+        Settings.FOVEnabled = value
+        if FOVCircle then
+            FOVCircle.Visible = value and Settings.AimbotEnabled
+        end
+    end)
+    FOVToggle.Position = UDim2.new(0, 0, 0, YPos)
+    YPos = YPos + 50
+
+    -- Slider FOV
+    local FOVSlider = CreateSlider(Container, "Tamanho FOV", 50, 400, Settings.FOVRadius, function(value)
+        Settings.FOVRadius = value
+        if FOVCircle then
+            FOVCircle.Size = UDim2.new(0, value * 2, 0, value * 2)
+            FOVCircle.Position = UDim2.new(0.5, -value, 0.5, -value)
+        end
+    end)
+    FOVSlider.Position = UDim2.new(0, 0, 0, YPos)
+    YPos = YPos + 75
+
+    -- Wall Check
+    local WallCheckToggle = CreateToggle(Container, "Wall Check", Settings.WallCheck, function(value)
+        Settings.WallCheck = value
+    end)
+    WallCheckToggle.Position = UDim2.new(0, 0, 0, YPos)
+    YPos = YPos + 50
+
+    -- Team Check
+    local TeamCheckToggle = CreateToggle(Container, "Team Check", Settings.TeamCheck, function(value)
+        Settings.TeamCheck = value
+    end)
+    TeamCheckToggle.Position = UDim2.new(0, 0, 0, YPos)
+    YPos = YPos + 50
+
+    -- Seção ESP
+    local EspSection = Instance.new("TextLabel")
+    EspSection.Parent = Container
+    EspSection.BackgroundTransparency = 1
+    EspSection.Size = UDim2.new(1, 0, 0, 30)
+    EspSection.Position = UDim2.new(0, 0, 0, YPos)
+    EspSection.Font = Enum.Font.GothamBold
+    EspSection.Text = "👁️ ESP"
+    EspSection.TextColor3 = Color3.fromRGB(100, 255, 150)
+    EspSection.TextSize = 22
+    EspSection.TextXAlignment = Enum.TextXAlignment.Left
+    YPos = YPos + 35
+
+    local ESPToggle = CreateToggle(Container, "Ativar ESP", Settings.ESPEnabled, function(value)
+        Settings.ESPEnabled = value
+    end)
+    ESPToggle.Position = UDim2.new(0, 0, 0, YPos)
+
+    Container.CanvasSize = UDim2.new(0, 0, 0, YPos + 100)
+
+    -- Funcionalidade do botão minimizar
+    MinimizeButton.MouseButton1Click:Connect(function()
+        Settings.Minimized = not Settings.Minimized
+        
+        local targetHeight = Settings.Minimized and MinimizedHeight or ExpandedHeight
+        local targetTransparency = Settings.Minimized and 1 or 0
+        
+        TweenService:Create(MainFrame, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+            Size = UDim2.new(0, 300, 0, targetHeight)
+        }):Play()
+        
+        TweenService:Create(Container, TweenInfo.new(0.2), {
+            Visible = not Settings.Minimized
+        }):Play()
+        
+        MinimizeButton.Text = Settings.Minimized and "□" or "−"
+    end)
+
+    -- Botão fechar (esconde a UI)
+    CloseButton.MouseButton1Click:Connect(function()
+        MainFrame.Visible = false
+    end)
+end
+
+-- Função ESP
+local function UpdateESP()
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and IsPlayerAlive(player) and not IsTeamMate(player) then
+            local character = player.Character
+            if character and Settings.ESPEnabled then
+                for _, part in ipairs(character:GetChildren()) do
+                    if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
+                        if not part:FindFirstChild("ESP_Outline") then
+                            local highlight = Instance.new("BoxHandleAdornment")
+                            highlight.Name
